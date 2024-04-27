@@ -1,4 +1,4 @@
-from flask import Flask,redirect, url_for, request
+from flask import Flask,redirect, url_for, request,render_template
 from flask_sqlalchemy import SQLAlchemy
 from Google import Create_Service
 from flask_migrate import Migrate
@@ -20,6 +20,16 @@ import tensorflow as tf
 import pickle as pk
 from tensorflow.keras.layers import Dropout, Dense
 from routes.send_mail import send_mail
+from routes.read_mail import read_mail
+from routes.delete_mail import delete_mail
+from routes.draft_mail import draft_mail
+from routes.search_mail import search_mail
+import cv2
+from flask import Flask,jsonify,request,render_template
+import numpy as np
+import face_recognition
+from flask import Flask, jsonify, request
+
 
 
 
@@ -32,26 +42,39 @@ def speak(text):
 
 
 
+
 #texttospeech
     
-def listen_and_execute():
+def listen_and_execute(max_attempts=10):
     recognizer = sr.Recognizer()
-    try:
-        with sr.Microphone() as source:
-            print("Listening...")
-            audio = recognizer.listen(source, timeout=10, phrase_time_limit=10)
-            print("Recognizing...")
-            command = recognizer.recognize_google(audio).lower()
-            speak("You said:")
-            speak(command)
-            pass
-            return command
-    except sr.WaitTimeoutError:
-        print("Timeout. No speech detected.")
-    except sr.UnknownValueError:
-        print("Could not understand audio")
-    except sr.RequestError as e:
-        print("Could not request results; {0}".format(e))
+    attempts = 0
+
+    while attempts < max_attempts:
+        try:
+            with sr.Microphone() as source:
+                print("Listening...")
+                audio = recognizer.listen(source, timeout=10, phrase_time_limit=10)
+                print("Recognizing...")
+                command = recognizer.recognize_google(audio).lower()
+                if 'draught' in command:
+                    command = command.replace("draught", "draft")
+                elif 'draughts' in command:
+                    command = command.replace("draughts", "drafts")
+                print("You said:", command)
+                speak(command)
+                return command
+        except sr.WaitTimeoutError:
+            speak("Timeout. No speech detected.")
+        except sr.UnknownValueError:
+            speak("Could not understand audio")
+        except sr.RequestError as e:
+            speak("Could not request results; {0}".format(e))
+        
+        attempts += 1
+        speak("Please try again.")
+    
+    speak("Max attempts reached. Exiting...")
+    return None
 
 
 BERT_MODEL = 'bert-base-uncased'
@@ -94,7 +117,7 @@ def load_model_checkpoint():
     # Check if the latest_checkpoint is not None before proceeding to load the model
     if latest_checkpoint:
         # Load the model using the latest checkpoint
-        model = JointIntentAndSlotFillingModel(total_intent_no=3, total_slot_no=9, dropout_prob=0.1)
+        model = JointIntentAndSlotFillingModel(total_intent_no=5, total_slot_no=9, dropout_prob=0.1)
         status=model.load_weights(latest_checkpoint)
         status.expect_partial()
         return model
@@ -186,6 +209,7 @@ def predict_intent_slots(text):
 
 
 
+
 #gmailapi
 
 CLIENT_SECRET_FILE = 'abcc.json'
@@ -212,334 +236,332 @@ class Users(db.Model):
     username = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
 
-    
-    pass
 
-
-
-
-
-
-
-def listen_fast():
-    recognizer = sr.Recognizer()
-
-    try:
-        with sr.Microphone() as source:
-            print("Listening...")
-            audio = recognizer.listen(source, timeout=5, phrase_time_limit=30)
-            print("Recognizing...")
-            command = recognizer.recognize_google(audio).lower()
-            speak("You said:")
-            speak(command)
-            speak("do you wanna edit at any parts if yes or no ") 
-            flag= listen_and_execute()
-            if(flag!="no"):
-                speak("start word")  
-                start_word  = listen_and_execute()
-                speak("end word")
-                end_word  = listen_and_execute()
-    
-                command=edit_msg(command,start_word,end_word)
-                return command
-            return command
-
-            
-    except sr.WaitTimeoutError:
-        print("Timeout. No speech detected.")
-    except sr.UnknownValueError:
-        print("Could not understand audio")
-    except sr.RequestError as e:
-        print("Could not request results; {0}".format(e))
-
-
-def edit_msg(command, start_word, end_word):
- 
-    # Find the start and end indices of the substring to replace
-    start_index = command.find(start_word)
-    end_index = command.find(end_word, start_index + len(start_word))
-    
-    # If both start and end words are found
-    if start_index != -1 and end_index != -1:
-        replacement=listen_and_execute()
-        edited_command = command[:start_index] + replacement + command[end_index + len(end_word):]
-        print( edited_command)
-        return edited_command
-    else:
-        speak("Start or end word not found in the command.")
-        return command
-        
-
-
-
-def listen_slow():
-    f=1
-    command=listen_and_execute()
-    while(f):
-       
-        speak(command)
-        speak("do you want to add anything")
-        flag=listen_and_execute()
-        if(flag=="no"):
-            return command
-        command=command+listen_and_execute()
- 
-
-def dictate_email_body():
-    while(1):
-        speak("How do you want to dictate the body of the email slow or fast")
-        speed = listen_and_execute()
-        if speed == "fast":
-            return listen_fast()
-        
-        elif speed == "slow":
-            return listen_slow()
-        else:
-            print("Invalid input. Please enter 'slow' or 'fast'.")
-
-        
-
-
-def read_emails():
-    """
-    Retrieve emails from Gmail inbox
-    """
-    speak("reading mails")
-    service = Create_Service(CLIENT_SECRET_FILE, API_NAME, API_VERSION, SCOPES)
-    results = service.users().messages().list(userId='me', labelIds=['INBOX']).execute()
-    messages = results.get('messages', [])
-
-    if not messages:
-        return 'No messages found.'
-    else:
-        print("Messages:")
-        for message in messages:
-            msg = service.users().messages().get(userId='me', id=message['id']).execute()
-            message_data = msg['payload']['headers']
-            for values in message_data:
-                name = values['name']
-               
-                if name == 'From':
-                    from_name = values['value']
-                    speak(from_name)
-                if name == 'Subject':
-                    subject = values['value']
-            if 'parts' in msg['payload']:        
-                msg_str = base64.urlsafe_b64decode(msg['payload']['parts'][0]['body']['data'].encode('ASCII')).decode('utf-8')
-                soup = BeautifulSoup(msg_str, 'html.parser')
-                body = soup.get_text()
-                print(f"From: {from_name}")
-                print(f"Subject: {subject}")
-            else:
-                print("noooooo") 
-
-
-
-def delete_last_message_from_sender(sender_name):
-    """
-    Retrieve emails from Gmail inbox and delete the last message from a specific sender
-    """
-    service = Create_Service(CLIENT_SECRET_FILE, API_NAME, API_VERSION, SCOPES)
-    results = service.users().messages().list(userId='me', labelIds=['INBOX']).execute()
-    messages = results.get('messages', [])
-
-    if not messages:
-        return 'No messages found.'
-
-    last_message_id = None
-    flag=1
-    for message in messages:
-        msg = service.users().messages().get(userId='me', id=message['id']).execute()
-        message_data = msg['payload']['headers']
-        for values in message_data:
-            name = values['name']
-          
-            if name == 'From':
-                from_name = values['value']
-                print(from_name)
-                if sender_name in from_name:
-
-                    last_message_id = message['id']
-                    flag=0
-                    break
-        if(flag==0):
-            break        
-    if last_message_id:
-        service.users().messages().delete(userId='me', id=last_message_id).execute()
-        return f"Last message from {sender_name} deleted successfully!"
-    else:
-        return f"No messages found from {sender_name}."
-
-
-
-def search_email(sender_name):
-    
-    service = Create_Service(CLIENT_SECRET_FILE, API_NAME, API_VERSION, SCOPES)
-    results = service.users().messages().list(userId='me', labelIds=['INBOX']).execute()
-    messages = results.get('messages', [])
-
-    if not messages:
-        return 'No messages found.'
-    flag=1
-    for message in messages:
-        msg = service.users().messages().get(userId='me', id=message['id']).execute()
-        message_data = msg['payload']['headers']
-        for values in message_data:
-            name = values['name']
-          
-            if name == 'From':
-                from_name = values['value']
-              
-                if sender_name in from_name:
-                    flag=0
-                    break
-        if(flag==0):
-            break    
-    if(flag==0):
-        speak("yes there is") 
-    else:
-        speak("no message")   
-
-
-
-
-def send_email_att():
-
-    """fl= listen_and_executee()
-    print(fl)"""
-    filename=listen_and_execute()
-    file_path = os.path.join(r'C:\Users\AJEES\Documents', filename)
-    if os.path.exists(file_path):  # Check if the file exists
-            print("yes")
-    else:
-            print(f"File  not found. Please enter a valid filename.")
-
-   
-   
-    service = Create_Service(CLIENT_SECRET_FILE, API_NAME, API_VERSION, SCOPES)
-
-    # Your email content
-    emailMsg = 'Here is your attachment.'
-    mimeMessage = MIMEMultipart()
-    mimeMessage['to'] = 'asna030502@gmail.com'
-    mimeMessage['subject'] = 'Email with Attachment'
-    mimeMessage.attach(MIMEText(emailMsg, 'plain'))
-    with open(file_path, 'rb') as file:
-        attachment = MIMEBase('application', 'octet-stream')
-        attachment.set_payload(file.read())
-
-    # Encode file in base64
-    encoders.encode_base64(attachment)
-
-    # Add headers to attachment
-    attachment.add_header(
-        'Content-Disposition',
-        f'attachment; filename= {os.path.basename(file_path)}'
-    )
-
-    # Attach the attachment to the email message
-    mimeMessage.attach(attachment)
-
-    # Convert message to string and encode as base64
-    raw_string = base64.urlsafe_b64encode(mimeMessage.as_bytes()).decode()
-
-    # Send the email
-    message = service.users().messages().send(userId='me', body={'raw': raw_string}).execute()
-
-    return 'Email sent successfully!'
-
-
-
-
-
-def create_draft_email():
-    """
-    Create a draft email using Gmail API
-    """
-    service = Create_Service(CLIENT_SECRET_FILE, API_NAME, API_VERSION, SCOPES)
-
-    emailMsg = 'This is a draft email.'
-    mimeMessage = MIMEMultipart()
-    mimeMessage['to'] = 'aanittantony@gmail.com'
-    mimeMessage['subject'] = 'Draft Email'
-    mimeMessage.attach(MIMEText(emailMsg, 'plain'))
-    raw_string = base64.urlsafe_b64encode(mimeMessage.as_bytes()).decode()
-
-    draft = {
-        'message': {
-            'raw': raw_string
-        }
-    }
-
-    draft = service.users().drafts().create(userId='me', body=draft).execute()
-    return 'Draft email created successfully!' 
 
 from routes.send_mail import send_mail_bp
+from routes.read_mail import read_mail_bp
+from routes.delete_mail import delete_mail_bp
+from routes.draft_mail import draft_mail_bp
+from routes.search_mail import search_mail_bp
+app.register_blueprint(search_mail_bp)
+app.register_blueprint(delete_mail_bp)
 app.register_blueprint(send_mail_bp)
-
-@app.route('/')
-def homee():
-    print("route workinggggg")
-    user_input = listen_and_execute()
-    intent, slots = predict_intent_slots(user_input)
-    print("Intent:", intent)
-    print("Slots:", slots)
-    if intent == "Readmail":
-        return redirect('read_mail', slots=slots)
-    elif intent == "Sendmail":
-        return send_mail(slots)
-    else:
-        return "Unknown intent"
+app.register_blueprint(read_mail_bp)
+app.register_blueprint(draft_mail_bp)
 
 
-@app.route('/send')
-# def send_mail():
-#     """
-#     Send email using Gmail API
-#     """
-#     slots = request.args.get('slots') 
-#     print(slots)
-#     service = Create_Service(CLIENT_SECRET_FILE, API_NAME, API_VERSION, SCOPES)
+@app.route('/add')
+def add():
    
-#     # emailMsg = dictate_email_body()
-#     # mimeMessage = MIMEMultipart()
-#     # mimeMessage['to'] = 'vmail456345@gmail.com'
-#     # mimeMessage['subject'] = 'You weree'
-#     # mimeMessage.attach(MIMEText(emailMsg, 'plain'))
-#     # raw_string = base64.urlsafe_b64encode(mimeMessage.as_bytes()).decode()
+    flag=1
+    while(flag):
+        # Get user input through speech recognition
+        speak("speak")
+        user_input = listen_and_execute()
+        
+        print(user_input)
+        speak("if correct say yes")
+        con=listen_and_execute()
+        # Check if user confirms the input
+        if 'yes' in con:
+            if "add contact" in user_input:
+                    speak("Speak username")
+                    command=listen_and_execute()
+                    username = command
+                    speak("Speak email")
+                    email = ""
+                    recognizer=sr.Recognizer()
+                    with sr.Microphone() as source:
+                        print("listening")
+                        email_audio = recognizer.listen(source, timeout=10, phrase_time_limit=10)
+                        letter = recognizer.recognize_google(email_audio).lower()
+                        print("Letter:", letter)
+                        # elif letter in number:
+                        #     letter = str(number[letter])
+                        email += letter
+                        email = email.replace(" ", "")
+                        print(email)
+                
+                    
+                    if not username or not email:
+                        return 'Both username and email are required'
 
-#     # message = service.users().messages().send(userId='me', body={'raw': raw_string}).execute()
-#     return 'Email sent successfully!'
 
-@app.route('/read')
+                    user = Users(username=username, email=email)
+                    db.session.add(user)
+                    db.session.commit()
+                    speak("'User added successfully'")
+                    return 'User added successfully'
+                
+            else:
+                intent, slots = predict_intent_slots(user_input)
+                print("Intent:", intent)
+                print("Slots:", slots)
+                flag=0
+                if intent == "Draftmail":
+                    
+                    reciever_name = slots.get('B-reciever')
+                    b_subject = slots.get('B-subject')
+                    i_subject = slots.get('I-subject')
+                    print(b_subject, i_subject)
+                    if b_subject is not None and i_subject is not None:
+                        # Concatenate the values of 'B-subject' and 'I-subject' with a space between them
+                        subject = b_subject + ' ' + i_subject
+                    elif b_subject is not None:
+                        # Use the value of 'B-subject' if only it exists
+                        subject = b_subject
+                    elif i_subject is not None:
+                        # Use the value of 'I-subject' if only it exists
+                        subject = i_subject
+                    else:
+                        subject=None
+                    return draft_mail(subject)
+                # Check the intent and redirect accordingly
+                elif intent == "Readmail":
+                    sender_name = slots.get('B-sender')
+                    if sender_name:
+                        with app.app_context():
+                    # Access the db to reflect the tables
+                            db.reflect()
+                            sender = Users.query.filter_by(username=sender_name).first()
+                            if sender:
+                                sender_email = sender.email
+                            else:
+                                return speak("sender not found in database")
 
-def read():
-    read_emails()
+                            print(sender_email)
+                            return read_mail(sender_email)
+                    else:
+                        return read_mail()
+                elif intent == "Searchmail":
+                    sender_name = slots.get('B-sender')
+                    
+                    b_subject = slots.get('B-subject')
+                    i_subject = slots.get('I-subject')
+                    if b_subject is not None and i_subject is not None:
+                        # Concatenate the values of 'B-subject' and 'I-subject' with a space between them
+                        subject = b_subject + ' ' + i_subject
+                    elif b_subject is not None:
+                        # Use the value of 'B-subject' if only it exists
+                        subject = b_subject
+                    elif i_subject is not None:
+                        # Use the value of 'I-subject' if only it exists
+                        subject = i_subject
+                    if sender_name:
+                        with app.app_context():
+                    # Access the db to reflect the tables
+                            db.reflect()
+                            sender = Users.query.filter_by(username=sender_name).first()
+                            if sender:
+                                sender_email = sender.email
+                            else:
+                                return speak("sender not found in database")
+
+                            print(sender_email,subject)
+                            if subject is None:
+                                return read_mail(sender_email)
+                            else:
+                                return search_mail(sender_email,subject)
+                    else:
+                        sender_email=None
+                        return search_mail(sender_email,subject)    
 
 
-@app.route('/att')
-def att():
-    result =send_email_att()
-    return result
-  
+                elif intent == "Sendmail":
+                    reciever_name = slots.get('B-reciever')
+                    subject=slots.get('B-subject')
+                    with app.app_context():
+                    # Access the db to reflect the tables
+                            db.reflect()
+                            reciever = Users.query.filter_by(username=reciever_name).first()
+                            if reciever:
+                                reciever_email = reciever.email
+                            else:
+                                return speak("reciever not found in database")
 
-@app.route('/delete')      
-def delete():
-    sender_name = "vmail456345@gmail.com"
-    result = delete_last_message_from_sender(sender_name)
-    return result
+                            print(reciever_email)
+                    return send_mail(reciever_email, subject)
+                elif intent == "deletemail":
+                        sender_name = slots.get('B-sender')
+                        with app.app_context():
+                        # Access the db to reflect the tables
+                            db.reflect()
+                            sender = Users.query.filter_by(username=sender_name).first()
+                            if sender:
+                                sender_email = sender.email
+                            else:
+                                return speak("sender not found in database")
 
-@app.route('/search')      
-def search():
-    sender_name = "noreply@jobalertshub.com"
-    search_email(sender_name)
+                            print(sender_email)
+                        return delete_mail(sender_email)
+                else:
+                    return "Unknown intent"
+        
 
 
-@app.route('/draft')
-def draftemail():
-    result = create_draft_email()
-    return result
+
+registered_data = {}
+
+registration_status_file = "registration_status.txt"
+
+
+# Function to read registration status from file
+def read_registration_status():
+    if os.path.exists(registration_status_file):
+        with open(registration_status_file, "r") as file:
+            return file.read().strip() == "done"
+    return False
+
+# Function to write registration status to file
+def write_registration_status(status):
+    with open(registration_status_file, "w") as file:
+        file.write("done" if status else "not_done")
+
+# Check if registration has been done
+registration_done = read_registration_status()
+
+@app.route("/") 
+def index():
+    if registration_done:
+        return redirect(url_for('login'))
+    else:
+        return render_template("index.html")
+
+@app.route("/register",methods=["POST"])
+def register():
+    name=listen_and_execute()
+    #name = request.form.get("name")
+    photo = request.files['photo']
+
+    uploads_folder = os.path.join(os.getcwd(),"static","uploads") 
+
+    if not os.path.exists(uploads_folder):
+        os.makedirs(uploads_folder)
+
+    global registration_done
+    if registration_done:
+        return redirect(url_for('login'))
+
+    photo.save(os.path.join(uploads_folder,f'{name}.jpg'))
+    registered_data[name] = f"{name}.jpg"
+
+    registration_done = True
+    write_registration_status(True)
+
+    response = {"success":True,'name':name}
+    return jsonify(response)
+
+@app.route("/login")
+
+def login():
+
+    video_capture = cv2.VideoCapture(0)
+    known_face_encodings = []
+    known_face_names = []
+
+# Path to the folder containing the images of known faces
+    uploads_folder = os.path.join(os.getcwd(),"static","uploads")
+
+# Iterate over files in the uploads folder
+    for filename in os.listdir(uploads_folder):
+        if filename.endswith(".jpg") or filename.endswith(".png"):
+            # Load the image file
+            image_path = os.path.join(uploads_folder, filename)
+            image = face_recognition.load_image_file(image_path)
+
+            # Find face encodings for all faces in the image
+            face_encodings = face_recognition.face_encodings(image)
+
+            # Add each face encoding and its corresponding filename to the lists
+            for face_encoding in face_encodings:
+                known_face_encodings.append(face_encoding)
+                known_face_names.append(os.path.splitext(filename)[0])
+
+    print("Known faces loaded successfully.")
+
+    # Now you have the known_face_encodings and known_face_names lists populated with face encodings and their corresponding filenames.
+
     
+    
+    face_locations = []
+    face_encodings = []
+    face_names = []
+    s=True
+ 
+ 
+ 
+ 
+    import time  # Import the time module
+
+# Initialize variables for face tracking
+    current_user_name = filename
+    basename = os.path.basename(current_user_name)
+    current_user = os.path.splitext(basename)[0]
+    print(current_user)
+    user_present_start_time = None
+    min_detection_time = 5  # Minimum time (in seconds) for face to be continuously detected
+
+    while True:
+        ret, frame = video_capture.read()  # Capture a frame and check if it's successful
+        if not ret:
+             print("Error: Failed to capture frame from webcam.")
+             break
+        _, frame = video_capture.read()
+        small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+        rgb_small_frame = np.ascontiguousarray(small_frame[:, :, ::-1])
+        if s:
+            face_locations = face_recognition.face_locations(rgb_small_frame)
+            face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
+            
+            for face_encoding in face_encodings:
+                matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
+                name = ""
+                face_distance = face_recognition.face_distance(known_face_encodings, face_encoding)
+                best_match_index = np.argmin(face_distance)
+                if matches[best_match_index]:
+                    name = known_face_names[best_match_index]
+                    
+                if(face_distance[best_match_index]>0.50):
+                    return "unsuccesfull"
+                # If the detected face is the same as the current user
+                if name == current_user:
+                    print(current_user)
+                    # If user_present_start_time is not set, set it
+                    if user_present_start_time is None:
+                        user_present_start_time = time.time()
+                    # If the face has been continuously detected for more than min_detection_time seconds
+                    elif time.time() - user_present_start_time >= min_detection_time:
+                        
+                        video_capture.release()
+                        cv2.destroyAllWindows()
+                        user_present_start_time = time.time()
+                        print("login succesfully")
+                        return render_template('indexx.html')   
+                        
+                        # Update the user_present_start_time to track continuous detection
+                        
+                else:
+                    # If a different face is detected, reset the current_user and user_present_start_time
+                    return "unsuccesfull"
+                   
+               
+                    
+        cv2.imshow("authenticate", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+    return "Error: Login failed"
+
+        
+
+
+
+@app.route("/speak", methods=["POST"])
+def speak_endpoint():
+    data = request.json
+    text = data.get("text")
+    speak(text)
+    return jsonify({"success": True})
+   
 
 if __name__ == '__main__':
     app.run()
