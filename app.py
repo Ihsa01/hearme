@@ -243,6 +243,8 @@ from routes.read_mail import read_mail_bp
 from routes.delete_mail import delete_mail_bp
 from routes.draft_mail import draft_mail_bp
 from routes.search_mail import search_mail_bp
+from routes.read_unread import read_unread, read_unread_bp
+app.register_blueprint(read_unread_bp)
 app.register_blueprint(search_mail_bp)
 app.register_blueprint(delete_mail_bp)
 app.register_blueprint(send_mail_bp)
@@ -250,20 +252,20 @@ app.register_blueprint(read_mail_bp)
 app.register_blueprint(draft_mail_bp)
 
 
-@app.route('/add')
+@app.route('/')
 def add():
    
     flag=1
     while(flag):
         # Get user input through speech recognition
-        speak("speak")
+        speak("how can i help you")
         user_input = listen_and_execute()
         
-        print(user_input)
         speak("if correct say yes")
         con=listen_and_execute()
         # Check if user confirms the input
         if 'yes' in con:
+            
             if "add contact" in user_input:
                     speak("Speak username")
                     command=listen_and_execute()
@@ -315,11 +317,24 @@ def add():
                         subject = i_subject
                     else:
                         subject=None
-                    return draft_mail(subject)
+                    if reciever_name is not None:
+                        with app.app_context():
+                    # Access the db to reflect the tables
+                            db.reflect()
+                            reciever = Users.query.filter_by(username=sender_name).first()
+                            if reciever:
+                                reciever_email = reciever.email
+                            else:
+                                speak("sender not found in database")
+                                return "sender not found in database"
+
+                            print(reciever_email,subject)
+                        
+                    return draft_mail(subject, reciever_email)
                 # Check the intent and redirect accordingly
                 elif intent == "Readmail":
                     sender_name = slots.get('B-sender')
-                    if sender_name:
+                    if sender_name is not None:
                         with app.app_context():
                     # Access the db to reflect the tables
                             db.reflect()
@@ -327,12 +342,13 @@ def add():
                             if sender:
                                 sender_email = sender.email
                             else:
-                                return speak("sender not found in database")
+                                speak("sender not found in database")
+                                return "sender not found in database"
 
                             print(sender_email)
                             return read_mail(sender_email)
                     else:
-                        return read_mail()
+                        return read_unread()
                 elif intent == "Searchmail":
                     sender_name = slots.get('B-sender')
                     
@@ -347,6 +363,8 @@ def add():
                     elif i_subject is not None:
                         # Use the value of 'I-subject' if only it exists
                         subject = i_subject
+                    else:
+                        subject=None
                     if sender_name:
                         with app.app_context():
                     # Access the db to reflect the tables
@@ -355,16 +373,14 @@ def add():
                             if sender:
                                 sender_email = sender.email
                             else:
-                                return speak("sender not found in database")
+                                speak("sender not found in database")
+                                return "sender not found in database"
 
                             print(sender_email,subject)
-                            if subject is None:
-                                return read_mail(sender_email)
-                            else:
-                                return search_mail(sender_email,subject)
+                            
                     else:
                         sender_email=None
-                        return search_mail(sender_email,subject)    
+                    return search_mail(sender_email,subject)    
 
 
                 elif intent == "Sendmail":
@@ -377,8 +393,8 @@ def add():
                             if reciever:
                                 reciever_email = reciever.email
                             else:
-                                return speak("reciever not found in database")
-
+                                speak("reciever not found in database")
+                                return "receiver not found in database"
                             print(reciever_email)
                     return send_mail(reciever_email, subject)
                 elif intent == "deletemail":
@@ -390,7 +406,8 @@ def add():
                             if sender:
                                 sender_email = sender.email
                             else:
-                                return speak("sender not found in database")
+                                speak("sender not found in database")
+                                return "sender not found in database"
 
                             print(sender_email)
                         return delete_mail(sender_email)
@@ -420,11 +437,14 @@ def write_registration_status(status):
 # Check if registration has been done
 registration_done = read_registration_status()
 
-@app.route("/") 
+@app.route("/add") 
 def index():
+    speak("welcome to hearme,voice assisted email system .")
     if registration_done:
+        speak("face the camera to login")
         return redirect(url_for('login'))
     else:
+        speak("To register,face  the camera and click anywhere on the screen")
         return render_template("index.html")
 
 @app.route("/register",methods=["POST"])
@@ -535,13 +555,16 @@ def login():
                         video_capture.release()
                         cv2.destroyAllWindows()
                         user_present_start_time = time.time()
-                        print("login succesfully")
+                        print("login succesfull")
+                        speak("login succesfull,click any where on the screen ")
+
                         return render_template('indexx.html')   
                         
                         # Update the user_present_start_time to track continuous detection
                         
                 else:
                     # If a different face is detected, reset the current_user and user_present_start_time
+                    speak("unsuccesfull")
                     return "unsuccesfull"
                    
                

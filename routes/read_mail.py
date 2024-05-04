@@ -1,3 +1,4 @@
+import re
 from flask import Flask, Blueprint, request, current_app
 from Google import Create_Service
 import base64
@@ -44,39 +45,59 @@ SCOPES = ['https://mail.google.com/', 'https://www.googleapis.com/auth/gmail.rea
 
 @read_mail_bp.route('/read')
 
+def extract_email_from_header(header):
+    match = re.search(r'<([^>]+)>', header)
+    if match:
+        return match.group(1)
+    return None
 
-
-def read_mail():
+def read_mail(sender_email):
     """
-    Retrieve emails from Gmail inbox
+    Retrieve the last email from a specific sender in the Gmail inbox and read out its content using speak()
     """
-    speak("reading mails")
-    print("reading  mails")
+    print("Reading mails")
+    
     service = Create_Service(CLIENT_SECRET_FILE, API_NAME, API_VERSION, SCOPES)
     results = service.users().messages().list(userId='me', labelIds=['INBOX']).execute()
     messages = results.get('messages', [])
 
+    last_email_from_sender = None
+
     if not messages:
+        speak('No messages found.')
         return 'No messages found.'
     else:
+        speak("Reading latest mail")
         print("Messages:")
         for message in messages:
             msg = service.users().messages().get(userId='me', id=message['id']).execute()
             message_data = msg['payload']['headers']
+            from_name = None
+            subject = None
             for values in message_data:
                 name = values['name']
-               
                 if name == 'From':
                     from_name = values['value']
-                    speak(from_name)
                 if name == 'Subject':
                     subject = values['value']
-            if 'parts' in msg['payload']:        
-                msg_str = base64.urlsafe_b64decode(msg['payload']['parts'][0]['body']['data'].encode('ASCII')).decode('utf-8')
-                soup = BeautifulSoup(msg_str, 'html.parser')
-                body = soup.get_text()
-                print(f"From: {from_name}")
-                print(f"Subject: {subject}")
-            else:
-                print("noooooo") 
+            if extract_email_from_header(from_name) == sender_email:
+                last_email_from_sender = msg
+                break
+            
+        if last_email_from_sender:
+            msg_str = base64.urlsafe_b64decode(last_email_from_sender['payload']['parts'][0]['body']['data'].encode('ASCII')).decode('utf-8')
+            soup = BeautifulSoup(msg_str, 'html.parser')
+            body = soup.get_text()
+            print("From:" + from_name)
+            print("Subject: " + subject)
+            print(body)
+            speak(f"From: {from_name}")
+            speak("On subject")
+            speak(subject)
+            speak("Content of the mail is")
+            speak(body)
+            return("read email successfully")
+        else:
+            speak(f"No email found from {sender_email}.")
+            return("No email found")
 

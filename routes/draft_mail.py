@@ -54,22 +54,36 @@ def listenn_and_execute():
     except sr.RequestError as e:
         print("Could not request results; {0}".format(e))
 
-def listen_and_execute():
+def listen_and_execute(max_attempts=10):
     recognizer = sr.Recognizer()
-    try:
-        with sr.Microphone() as source:
-            print("Listening...")
-            audio = recognizer.listen(source, timeout=10, phrase_time_limit=10)
-            print("Recognizing...")
-            command = recognizer.recognize_google(audio).lower()
-            pass
-            return command
-    except sr.WaitTimeoutError:
-        print("Timeout. No speech detected.")
-    except sr.UnknownValueError:
-        print("Could not understand audio")
-    except sr.RequestError as e:
-        print("Could not request results; {0}".format(e))
+    attempts = 0
+
+    while attempts < max_attempts:
+        try:
+            with sr.Microphone() as source:
+                print("Listening...")
+                audio = recognizer.listen(source, timeout=10, phrase_time_limit=10)
+                print("Recognizing...")
+                command = recognizer.recognize_google(audio).lower()
+                if 'draught' in command:
+                    command = command.replace("draught", "draft")
+                elif 'draughts' in command:
+                    command = command.replace("draughts", "drafts")
+                print("You said:", command)
+                speak(command)
+                return command
+        except sr.WaitTimeoutError:
+            speak("Timeout. No speech detected.")
+        except sr.UnknownValueError:
+            speak("Could not understand audio")
+        except sr.RequestError as e:
+            speak("Could not request results; {0}".format(e))
+        
+        attempts += 1
+        speak("Please try again.")
+    
+    speak("Max attempts reached. Exiting...")
+    return None
 
 
 
@@ -185,7 +199,7 @@ def draft_mail(subject_=None, receiver_email=None):
             if not matching_drafts:
                 return "No matching drafts found."
 
-        elif subject_ is not None:
+        elif subject_ is not None and receiver_email is None:
             # Case 3: Subject is provided, take the latest draft with the subject
             latest_matching_draft = None
             for draft in drafts:
@@ -193,6 +207,7 @@ def draft_mail(subject_=None, receiver_email=None):
                 draft_info = service.users().drafts().get(userId='me', id=draft_id, format='full').execute()
                 headers = draft_info['message']['payload']['headers']
                 draft_subject = None
+                draft_sender = None
                 for header in headers:
                     if header['name'] == 'Subject':
                         draft_subject = header['value']
@@ -252,6 +267,7 @@ def draft_mail(subject_=None, receiver_email=None):
                     return "Draft not updated."
 
             else:
+                speak("No draft found with the specified subject")
                 return "No draft found with the specified subject."
 
         elif receiver_email is not None:
@@ -260,7 +276,8 @@ def draft_mail(subject_=None, receiver_email=None):
             latest_draft_id = latest_draft['id']
             latest_draft_info = service.users().drafts().get(userId='me', id=latest_draft_id, format='full').execute()
             headers = latest_draft_info['message']['payload']['headers']
-            draft_subject = latest_draft_sender = None
+            draft_subject = draft_sender = None
+
             for header in headers:
                 if header['name'] == 'Subject':
                     draft_subject = header['value']
@@ -308,10 +325,13 @@ def draft_mail(subject_=None, receiver_email=None):
                     flag = listen_and_execute()
                     if 'yes' in flag:
                         send_message(service, draft_id=draft['id'], user_id='me')
+                        speak("Draft updated and sent successfully")
                         return "Draft updated and sent successfully"
                     else:
+                        speak("Draft updated successfully")
                         return "Draft updated successfully"
                 else:
+                    speak("Draft updated successfully")
                     return "Draft not updated."
                     
             else:
