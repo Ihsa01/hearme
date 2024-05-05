@@ -4,7 +4,7 @@
 
 ## Model
 https://drive.google.com/drive/folders/1QrPEeBVbtK2uF32dIlbEhVGPasOXqeou?usp=sharing
-"data" folder contains the dataset used to train the model
+1."data" folder contains the dataset used to train the model
 
 
 ## How to run the application on your system
